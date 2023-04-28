@@ -10,15 +10,20 @@ fn main() -> anyhow::Result<()> {
     let module = Module::from_file(&store, Path::new("wasm/script.wasm"))?;
 
     struct Env {
+        // the memory field is an Option because it cant be directly initialized to the memory of our script
+        // since we need to declare our environment before initializing the script, but we need the script
+        // to be inicialized to access it's memory
         memory: Option<Memory>,
     }
 
-    let print_def = |mut env: FunctionEnvMut<Env>, ptr: WasmPtr<u8>| {
-        let (e, sstore) = env.data_and_store_mut();
-        let mem = e.memory.as_ref().unwrap();
+    let print_def = |mut _env: FunctionEnvMut<Env>, str_ptr: WasmPtr<u8>| {
+        let (env, mut_store) = _env.data_and_store_mut();
 
-        let mem_view = mem.view(&sstore);
-        let string = ptr.read_utf8_string_with_nul(&mem_view).unwrap();
+        // This shouldn't ever fail. We initialize the memory variable as soon as our script runs. So this is always avaliable when the script calls this function
+        let memory = env.memory.as_ref().unwrap();
+
+        let memory_view = memory.view(&mut_store);
+        let string = str_ptr.read_utf8_string_with_nul(&memory_view).unwrap();
         println!("Print from WASM: {:?}", string);
     };
 
@@ -39,13 +44,14 @@ fn main() -> anyhow::Result<()> {
     };
 
     let instance = Instance::new(&mut store, &module, &import_object)?;
-    let memory = instance.exports.get_memory("memory")?;
 
+    // Finally access the script's memory
+    let memory = instance.exports.get_memory("memory")?;
     let mut env_mut = env.as_mut(&mut store);
     env_mut.memory = Some(memory.clone());
 
-    let mainfn = instance.exports.get_function("main")?;
-    mainfn.call(&mut store, &[])?;
+    let main_fn = instance.exports.get_function("main")?;
+    main_fn.call(&mut store, &[])?;
 
     Ok(())
 }
